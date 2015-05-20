@@ -2,19 +2,22 @@ import numpy as np
 import os
 import os.path as op
 from os.path import join as pjoin
+import re
+import shutil
+import subprocess
+from nose.tools import assert_equal
 from numpy.testing import assert_raises, assert_array_equal
-from tempfile import mktemp
+from tempfile import mkdtemp, mktemp
 import nibabel as nib
 
 from surfer import Brain, io, utils
-from surfer.utils import requires_fsaverage
+from surfer.utils import requires_ffmpeg, requires_fsaverage
 from mayavi import mlab
 
 subj_dir = utils._get_subjects_dir()
 subject_id = 'fsaverage'
 std_args = [subject_id, 'lh', 'inflated']
 data_dir = pjoin(op.dirname(__file__), '..', '..', 'examples', 'example_data')
-small_brain = dict(size=100)
 
 overlay_fname = pjoin(data_dir, 'lh.sig.nii.gz')
 
@@ -48,11 +51,11 @@ def test_image():
 
     mlab.options.backend = 'auto'
     subject_id, _, surf = std_args
-    brain = Brain(subject_id, 'both', surf=surf, config_opts=small_brain)
+    brain = Brain(subject_id, 'both', surf=surf, size=100)
     brain.add_overlay(overlay_fname, hemi='lh', min=5, max=20, sign="pos")
     brain.save_imageset(tmp_name, ['med', 'lat'], 'jpg')
 
-    brain = Brain(*std_args, config_opts=small_brain)
+    brain = Brain(*std_args, size=100)
     brain.save_image(tmp_name)
     brain.save_montage(tmp_name, ['l', 'v', 'm'], orientation='v')
     brain.save_montage(tmp_name, ['l', 'v', 'm'], orientation='h')
@@ -72,12 +75,17 @@ def test_brains():
     hemis = ['lh', 'rh']
     curvs = [True, False]
     titles = [None, 'Hello']
-    config_opts = [{}, dict(size=(800, 800))]
+    cortices = ["low_contrast", ("Reds", 0, 1, False)]
+    sizes = [500, (400, 300)]
+    backgrounds = ["white", "blue"]
+    foregrounds = ["black", "white"]
     figs = [None, mlab.figure()]
     subj_dirs = [None, subj_dir]
-    for surf, hemi, curv, title, co, fig, sd \
-            in zip(surfs, hemis, curvs, titles, config_opts, figs, subj_dirs):
-        brain = Brain(subject_id, hemi, surf, curv, title, co, fig, sd)
+    for surf, hemi, curv, title, cort, s, bg, fg, fig, sd \
+            in zip(surfs, hemis, curvs, titles, cortices, sizes,
+                   backgrounds, foregrounds, figs, subj_dirs):
+        brain = Brain(subject_id, hemi, surf, curv, title,
+                      cort, s, bg, fg, fig, sd)
         brain.close()
     assert_raises(ValueError, Brain, subject_id, 'lh', 'inflated',
                   subjects_dir='')
@@ -89,11 +97,12 @@ def test_annot():
     """
     mlab.options.backend = 'test'
     annots = ['aparc', 'aparc.a2005s']
-    borders = [True, False]
+    borders = [True, False, 2]
     alphas = [1, 0.5]
     brain = Brain(*std_args)
     for a, b, p in zip(annots, borders, alphas):
         brain.add_annotation(a, b, p)
+    assert_raises(ValueError, brain.add_annotation, 'aparc', borders=-1)
     brain.close()
 
 
@@ -205,6 +214,44 @@ def test_morphometry():
     brain.close()
 
 
+@requires_ffmpeg
+@requires_fsaverage
+def test_movie():
+    """Test saving a movie of an MEG inverse solution
+    """
+    # create and setup the Brain instance
+    mlab.options.backend = 'auto'
+    brain = Brain(*std_args)
+    stc_fname = os.path.join(data_dir, 'meg_source_estimate-lh.stc')
+    stc = io.read_stc(stc_fname)
+    data = stc['data']
+    time = np.arange(data.shape[1]) * stc['tstep'] + stc['tmin']
+    brain.add_data(data, colormap='hot', vertices=stc['vertices'],
+                   smoothing_steps=10, time=time, time_label='time=%0.2f ms')
+    brain.scale_data_colormap(fmin=13, fmid=18, fmax=22, transparent=True)
+
+    # save movies with different options
+    tempdir = mkdtemp()
+    try:
+        dst = os.path.join(tempdir, 'test.mov')
+        brain.save_movie(dst)
+        brain.save_movie(dst, tmin=0.081, tmax=0.102)
+        # test the number of frames in the movie
+        sp = subprocess.Popen(('ffmpeg', '-i', 'test.mov', '-vcodec', 'copy',
+                               '-f', 'null', '/dev/null'), cwd=tempdir,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = sp.communicate()
+        m = re.search('frame=\s*(\d+)\s', stderr)
+        if not m:
+            raise RuntimeError(stderr)
+        n_frames = int(m.group(1))
+        assert_equal(n_frames, 3)
+    finally:
+        # clean up
+        shutil.rmtree(tempdir)
+    brain.close()
+
+
 @requires_fsaverage
 def test_overlay():
     """Test plotting of overlay
@@ -244,7 +291,7 @@ def test_probabilistic_labels():
     """
     mlab.options.backend = 'test'
     brain = Brain("fsaverage", "lh", "inflated",
-                  config_opts=dict(cortex="low_contrast"))
+                  cortex="low_contrast")
 
     brain.add_label("BA1", color="darkblue")
 
@@ -255,7 +302,7 @@ def test_probabilistic_labels():
 
     label_file = pjoin(subj_dir, "fsaverage", "label", "lh.BA6.label")
     prob_field = np.zeros_like(brain._geo.x)
-    ids, probs = io.read_label(label_file, read_scalars=True)
+    ids, probs = nib.freesurfer.read_label(label_file, read_scalars=True)
     prob_field[ids] = probs
     brain.add_data(prob_field, thresh=1e-5)
 
@@ -279,7 +326,7 @@ def test_animate():
     """Test animation
     """
     mlab.options.backend = 'auto'
-    brain = Brain(*std_args, config_opts=small_brain)
+    brain = Brain(*std_args, size=100)
     brain.add_morphometry('curv')
     tmp_name = mktemp() + '.avi'
     brain.animate(["m"] * 3, n_steps=2)

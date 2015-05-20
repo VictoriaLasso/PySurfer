@@ -1,7 +1,7 @@
 import os
 from tempfile import mktemp
 
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, check_output
 import gzip
 import numpy as np
 import nibabel as nib
@@ -69,31 +69,6 @@ def read_scalar_data(filepath):
         fobj.close()
 
     return scalar_data
-
-
-def read_label(filepath, read_scalars=False):
-    """Load in a Freesurfer .label file.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to label file
-    read_scalars : bool
-        If true, read and return scalars associated with each vertex
-
-    Returns
-    -------
-    label_array : numpy array (ints)
-        Array with indices of vertices included in label
-    scalar_array : numpy array (floats)
-        If read_scalars is True, array of scalar data for each vertex
-
-    """
-    label_array = np.loadtxt(filepath, dtype=np.int, skiprows=2, usecols=[0])
-    if read_scalars:
-        scalar_array = np.loadtxt(filepath, skiprows=2, usecols=[-1])
-        return label_array, scalar_array
-    return label_array
 
 
 def read_stc(filepath):
@@ -179,7 +154,7 @@ def project_volume_data(filepath, hemi, reg_file=None, subject_id=None,
         Average over projection samples, take max, or take point sample
     projarg : single float or sequence of three floats
         Single float for point sample, sequence for avg/max specifying
-        start, stop, and stop
+        start, stop, and step
     surf : string
         Target surface
     smooth_fwhm : float
@@ -191,6 +166,18 @@ def project_volume_data(filepath, hemi, reg_file=None, subject_id=None,
     verbose : bool, str, int, or None
         If not None, override default verbose level (see surfer.verbose).
     """
+
+    env = os.environ
+    if 'FREESURFER_HOME' not in env:
+        raise RuntimeError('FreeSurfer environment not defined. Define the '
+                           'FREESURFER_HOME environment variable.')
+    # Run FreeSurferEnv.sh if not most recent script to set PATH
+    if not env['PATH'].startswith(os.path.join(env['FREESURFER_HOME'], 'bin')):
+        cmd = ['bash', '-c', 'source {} && env'.format(
+               os.path.join(env['FREESURFER_HOME'], 'FreeSurferEnv.sh'))]
+        envout = check_output(cmd)
+        env = dict(line.split('=', 1) for line in envout.split('\n') if line)
+
     # Set the basic commands
     cmd_list = ["mri_vol2surf",
                 "--mov", filepath,
@@ -228,7 +215,7 @@ def project_volume_data(filepath, hemi, reg_file=None, subject_id=None,
     out_file = mktemp(prefix="pysurfer-v2s", suffix='.mgz')
     cmd_list.extend(["--o", out_file])
     logger.info(" ".join(cmd_list))
-    p = Popen(cmd_list, stdout=PIPE, stderr=PIPE)
+    p = Popen(cmd_list, stdout=PIPE, stderr=PIPE, env=env)
     stdout, stderr = p.communicate()
     out = p.returncode
     if out:

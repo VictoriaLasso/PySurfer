@@ -5,25 +5,22 @@ Using Annotation Files
 Display a Freesurfer cortical parcellation from an annotation file.
 
 """
-print(__doc__)
-
 import os
 from os.path import join as pjoin
 from surfer import Brain
 
+print(__doc__)
 
 subject_id = 'fsaverage'
 hemi = 'both'
 surface = 'inflated'
 view = 'frontal'
 
-
 """
 Bring up the visualization
 """
 brain = Brain(subject_id, hemi, surface, views=view,
-              config_opts={"cortex": "bone",
-                           "background": "ivory"})
+              cortex="bone", background="ivory")
 
 """
 Display the 'aparc' parcellation borders.
@@ -46,4 +43,4 @@ subjects_dir = os.environ["SUBJECTS_DIR"]
 annot_path = pjoin(subjects_dir, subject_id, "label", "lh.aparc.annot")
 brain.add_annotation(annot_path, hemi='lh', borders=False, alpha=.75)
 annot_path = pjoin(subjects_dir, subject_id, "label", "rh.aparc.a2009s.annot")
-brain.add_annotation(annot_path, hemi='rh', remove_existing=False)
+brain.add_annotation(annot_path, hemi='rh', borders=2, remove_existing=False)

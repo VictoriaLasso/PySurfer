@@ -1,7 +1,7 @@
 language: python
 
 env:
-    # Enable python 2 and python 3 builds
+    # Enable Python 2 and Python 3 builds
     # DEPS=full: build optional dependencies: pandas, nitime, statsmodels,
     #            scikit-learn, patsy, nibabel; in the case of Python 2, also
     #            nitime
@@ -13,10 +13,10 @@ env:
 
 # Setup anaconda
 before_install:
-    - wget http://repo.continuum.io/miniconda/Miniconda-2.2.2-Linux-x86_64.sh -O miniconda.sh
+    - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
     - chmod +x miniconda.sh
     - ./miniconda.sh -b
-    - export PATH=/home/travis/anaconda/bin:$PATH
+    - export PATH=/home/travis/miniconda/bin:$PATH
     - conda update --yes conda
 
 install:
@@ -25,6 +25,7 @@ install:
     # Pillow (or PIL/imaging) is necessary for scipy.misc.imsave to exist
     - conda install --yes --quiet ipython==1.1.0 numpy scipy mayavi matplotlib nose imaging
     - if [ "${DEPS}" == "full" ]; then
+        travis_retry sudo apt-get update -qq;
         travis_retry sudo apt-get install mencoder;
       fi;
     - pip install -q coverage coveralls nose-timer nibabel flake8
@@ -37,27 +38,16 @@ before_script:
     - export DISPLAY=:99.0
     - /sbin/start-stop-daemon --start --quiet --pidfile /tmp/custom_xvfb_99.pid --make-pidfile --background --exec /usr/bin/Xvfb -- :99 -screen 0 1400x900x24 -ac +extension GLX +render
     - cd ~
-    - wget --quiet http://faculty.washington.edu/larsoner/fsaverage_min.tar.gz
+    - wget --quiet http://faculty.washington.edu/larsoner/fsaverage_min.zip
     - mkdir subjects
-    - tar --directory subjects -xzf fsaverage_min.tar.gz
+    - cd subjects
+    - unzip ../fsaverage_min.zip
+    - cd ..
     - export SUBJECTS_DIR="${PWD}/subjects"
-    - SURFER_DIR=$(python -c 'import surfer;print(surfer.__path__[0])')
-    # Link coverage to src dir, coveralls should be run from there (needs git calls)
-    - ln -s ${SURFER_DIR}/../.coverage ${SRC_DIR}/.coverage
-    - cd ${SURFER_DIR}/../
-    - ln -s ${SRC_DIR}/.coveragerc .coveragerc
-    - ln -s ${SRC_DIR}/Makefile Makefile
-    - ln -s ${SRC_DIR}/setup.cfg setup.cfg
-    - ln -s ${SRC_DIR}/examples examples
 
 script:
-    - # Nose-timer has bugs on 3+ as of Jan 2014
-    - if [ "{PYTHON}" == "2.7" ]; then
-        nosetests --with-timer --timer-top-n 20;
-      else
-        nosetests;
-      fi
     - cd ${SRC_DIR}
+    - nosetests --with-timer --timer-top-n 10
     - make flake
 
 after_success:
